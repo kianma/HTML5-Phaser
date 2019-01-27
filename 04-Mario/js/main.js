@@ -39,34 +39,40 @@ gameScene.preload = function() {
 // executed once, after assets were loaded
 gameScene.create = function() {
 	// Anims
-	this.anims.create({
-		key: 'walking',
-		frames: this.anims.generateFrameNames('player', {
-			frames: [0, 1, 2]
-		}),
-		frameRate: 12,
-		yoyo: true,
-		repeat: -1
-	});
+	if (!this.anims.get('walking')){
+		this.anims.create({
+			key: 'walking',
+			frames: this.anims.generateFrameNames('player', {
+				frames: [0, 1, 2]
+			}),
+			frameRate: 12,
+			yoyo: true,
+			repeat: -1
+		});
+	}
 
-	this.anims.create({
-		key: 'burning',
-		frames: this.anims.generateFrameNames('fire', {
-			frames: [0, 1]
-		}),
-		frameRate: 4,
-		repeat: -1
-	});
-
-	this.physics.world.bounds.width = 360;
-	this.physics.world.bounds.height = 700;
+	if(!this.anims.get('burning')){
+		this.anims.create({
+			key: 'burning',
+			frames: this.anims.generateFrameNames('fire', {
+				frames: [0, 1]
+			}),
+			frameRate: 4,
+			repeat: -1
+		});
+	}
 
 	// Sprite Creation
 	this.setupLevel();
 
+	// Set up barrel spawner
+	this.setupSpawner();
+
 	// Collision detection
-	this.physics.add.collider(this.player, this.platforms);
-	this.physics.add.collider(this.goal, this.platforms);
+	this.physics.add.collider([this.player, this.goal, this.barrels], this.platforms);
+
+	// Overlap detection
+	this.physics.add.overlap(this.player, [this.fires, this.goal, this.barrels], this.restartGame, null, this);
 
 	// Enable cursor keys
 	this.cursors = this.input.keyboard.createCursorKeys();
@@ -126,8 +132,11 @@ gameScene.update = function() {
 gameScene.setupLevel = function() {
 	this.levelData = this.cache.json.get('levelData');
 
+	this.physics.world.bounds.width = this.levelData.world.width;
+	this.physics.world.bounds.height = this.levelData.world.height;
+
 	// Add Sprites to Physics
-	this.platforms = this.add.group();
+	this.platforms = this.physics.add.staticGroup();
 	for (let i = 0; i < this.levelData.platforms.length; i++)
 	{
 		let curr = this.levelData.platforms[i];
@@ -150,18 +159,14 @@ gameScene.setupLevel = function() {
 		this.platforms.add(newObj);
 	}
 
-	this.fires = this.add.group();
+	this.fires = this.physics.add.group({
+		allowGravity: false,
+		immovable: true
+	});
 	for (let i = 0; i < this.levelData.fires.length; i++)
 	{
 		let curr = this.levelData.fires[i];
-		let newObj;
-
-		newObj = this.add.sprite(curr.x, curr.y, 'fire').setOrigin(0);
-
-		// Enable physics
-		this.physics.add.existing(newObj);
-		newObj.body.allowGravity = false;
-		newObj.body.immovable = true;
+		let newObj = this.add.sprite(curr.x, curr.y, 'fire').setOrigin(0);
 
 		newObj.anims.play('burning');
 
@@ -176,6 +181,50 @@ gameScene.setupLevel = function() {
 	// Goal
 	this.goal = this.add.sprite(this.levelData.goal.x, this.levelData.goal.y, 'goal');
 	this.physics.add.existing(this.goal);
+
+	this.cameras.main.setBounds(0, 0, this.levelData.world.width, this.levelData.world.height);
+	this.cameras.main.startFollow(this.player);
+};
+
+// Restart Game
+gameScene.restartGame = function(player, targetSprite){
+	this.cameras.main.fade(500);
+	this.cameras.main.on('camerafadeoutcomplete', function(){
+		this.scene.restart();
+		}, this);
+};
+
+gameScene.setupSpawner = function(){
+	this.barrels = this.physics.add.group({
+		bounceY: 0.1,
+		bounceX: 1,
+		collideWorldBounds: true
+	});
+
+	let spawningEvent = this.time.addEvent({
+		delay: this.levelData.spawner.interval,
+		loop: true,
+		callbackScope: this,
+		callback: function(){
+			// let barrel = this.barrels.create(this.goal.x, this.goal.y, 'barrel');
+			let barrel = this.barrels.get(this.goal.x, this.goal.y, 'barrel');
+			barrel.setActive(true);
+			barrel.setVisible(true);
+			barrel.body.enable = true;
+
+			barrel.setVelocityX(this.levelData.spawner.speed);
+
+			this.time.addEvent({
+				delay: this.levelData.spawner.lifespan,
+				repeat: 0,
+				callbackScope: this,
+				callback: function(){
+					this.barrels.killAndHide(barrel);
+					barrel.body.enable = false;
+				}
+			});
+		}
+	});
 };
 
 // our game's configuration
